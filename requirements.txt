@@ -1,0 +1,6 @@
+opencv-python
+tensorflow
+pymodbus
+streamlit
+matplotlib
+seaborn 
