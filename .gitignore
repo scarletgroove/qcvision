@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Runtime output — not source code
+defect_log.csv
+defective_images/
+temp_videos/
+
+# Calibration output files
+calibration_frame_*.jpg
+calibration_params_*.txt
+debug_frame_*.jpg
+
+# Trained model weights — too large for git
+models/*.h5
+models/*.pt
+models/*.pth
+models/*.onnx
+models/*.tflite
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
