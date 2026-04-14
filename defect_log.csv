@@ -1,0 +1,13 @@
+Timestamp,Defect_Type,Confidence,Image_Width,Image_Height,X_Coord,Y_Coord,Bounding_Box,Area_Pixels,Image_Path
+2026-04-12 11:50:19,surface_defect,1.00,853,479,567,451,"540,424,595,479",1323.0,defective_images/defect_frame_20260412_115019_971.jpg
+2026-04-12 11:50:20,color_anomaly,0.61,853,479,5,388,"0,366,11,411",221.5,defective_images/defect_frame_20260412_115020_038.jpg
+2026-04-12 11:50:20,surface_defect,1.00,853,479,826,471,"799,463,853,479",389.0,defective_images/defect_frame_20260412_115020_979.jpg
+2026-04-12 11:50:21,color_anomaly,0.61,853,479,6,278,"0,272,12,284",69.5,defective_images/defect_frame_20260412_115021_092.jpg
+2026-04-12 11:50:22,surface_defect,1.00,853,479,828,472,"807,466,849,479",278.0,defective_images/defect_frame_20260412_115021_994.jpg
+2026-04-12 11:50:22,color_anomaly,0.63,853,479,10,372,"0,325,20,419",668.5,defective_images/defect_frame_20260412_115022_105.jpg
+2026-04-12 11:50:23,surface_defect,1.00,853,479,832,472,"812,466,853,479",236.5,defective_images/defect_frame_20260412_115023_115.jpg
+2026-04-12 11:50:23,color_anomaly,0.58,853,479,6,382,"0,353,13,412",299.0,defective_images/defect_frame_20260412_115023_115.jpg
+2026-04-12 11:50:24,surface_defect,1.00,853,479,303,467,"291,455,316,479",294.5,defective_images/defect_frame_20260412_115024_142.jpg
+2026-04-12 11:50:24,color_anomaly,0.53,853,479,5,277,"0,272,10,283",60.5,defective_images/defect_frame_20260412_115024_142.jpg
+2026-04-12 11:50:25,surface_defect,1.00,853,479,84,474,"73,469,96,479",115.0,defective_images/defect_frame_20260412_115025_206.jpg
+2026-04-12 11:50:25,color_anomaly,0.60,853,479,768,467,"760,462,776,473",94.0,defective_images/defect_frame_20260412_115025_206.jpg

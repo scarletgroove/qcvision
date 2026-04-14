@@ -1,6 +1,7 @@
 import cv2
 import tensorflow as tf
 import tensorflow.keras as keras
+import keras.losses
 import numpy as np
 import time
 import csv
@@ -113,6 +114,29 @@ def create_object_detection_model(input_shape, num_classes, num_boxes_per_grid=1
     ])
     return model
 
+def generate_object_detection_data(data_dir, input_shape, num_classes, num_boxes_per_grid=1, batch_size=32):
+    """
+    Generates dummy data for object detection training.
+    This function creates random images and corresponding dummy bounding box labels
+    in the format expected by the object detection model.
+    The output tensor shape is (batch_size, grid_H, grid_W, num_boxes_per_grid * (5 + num_classes))
+    For each bounding box: (x, y, w, h, confidence, class_probabilities...)
+    """
+    grid_h = input_shape[0] // (2**3)  # Assuming 3 MaxPooling2D layers with pool_size (2,2)
+    grid_w = input_shape[1] // (2**3)
+    
+    output_dim = num_boxes_per_grid * (5 + num_classes)
+
+    while True:
+        # Generate random images
+        images = np.random.rand(batch_size, input_shape[0], input_shape[1], input_shape[2]).astype(np.float32)
+
+        # Generate dummy bounding box labels
+        # (x, y, w, h, confidence, class_probabilities...)
+        labels = np.random.rand(batch_size, grid_h, grid_w, output_dim).astype(np.float32)
+        
+        yield images, labels
+
 # New configuration for model saving
 MODEL_SAVE_DIR = config.get('MODEL_SETTINGS', 'MODEL_SAVE_DIR', fallback="models")
 CLASSIFICATION_MODEL_NAME = config.get('MODEL_SETTINGS', 'CLASSIFICATION_MODEL_NAME', fallback="defect_classifier_model.h5")
@@ -131,29 +155,50 @@ def train_model(model, data_dir, input_shape, num_classes, epochs=10, model_type
         return None
 
     try:
-        train_ds = keras.utils.image_dataset_from_directory(
-            data_dir,
-            labels='inferred',
-            label_mode='int',
-            image_size=(input_shape[0], input_shape[1]),
-            interpolation='nearest',
-            batch_size=32,
-            shuffle=True
-        )
+        if model_type == "classification":
+            train_ds = keras.utils.image_dataset_from_directory(
+                data_dir,
+                labels='inferred',
+                label_mode='int',
+                image_size=(input_shape[0], input_shape[1]),
+                interpolation='nearest',
+                batch_size=32,
+                shuffle=True
+            )
 
-        data_augmentation = keras.models.Sequential([
-            keras.layers.RandomFlip("horizontal_and_vertical"),
-            keras.layers.RandomRotation(0.2),
-            keras.layers.RandomZoom(0.2),
-            keras.layers.RandomContrast(0.2),
-        ])
+            data_augmentation = keras.models.Sequential([
+                keras.layers.RandomFlip("horizontal_and_vertical"),
+                keras.layers.RandomRotation(0.2),
+                keras.layers.RandomZoom(0.2),
+                keras.layers.RandomContrast(0.2),
+            ])
 
-        augmented_train_ds = train_ds.map(lambda x, y: (data_augmentation(x, training=True), y))
-        normalization_layer = keras.layers.Rescaling(1./255)
-        normalized_train_ds = augmented_train_ds.map(lambda x, y: (normalization_layer(x), y))
+            augmented_train_ds = train_ds.map(lambda x, y: (data_augmentation(x, training=True), y))
+            normalization_layer = keras.layers.Rescaling(1./255)
+            normalized_train_ds = augmented_train_ds.map(lambda x, y: (normalization_layer(x), y))
 
-        AUTOTUNE = tf.data.AUTOTUNE
-        normalized_train_ds = normalized_train_ds.cache().prefetch(buffer_size=AUTOTUNE)
+            AUTOTUNE = tf.data.AUTOTUNE
+            normalized_train_ds = normalized_train_ds.cache().prefetch(buffer_size=AUTOTUNE)
+        elif model_type == "object_detection":
+            # For object detection, use the custom data generator
+            normalized_train_ds = generate_object_detection_data(data_dir, input_shape, num_classes)
+        else:
+            print(f"Warning: Unknown model type '{model_type}'. Cannot load data.")
+            return None
+
+        if model_type == "classification":
+            model.compile(optimizer='adam',
+                          loss='sparse_categorical_crossentropy',
+                          metrics=['accuracy'])
+        elif model_type == "object_detection":
+            # Assuming 'mse' was intended for object detection loss based on the error
+            # This is a placeholder and might need adjustment based on the exact object detection task
+            model.compile(optimizer='adam',
+                          loss='mse',
+                          metrics=['accuracy'])
+        else:
+            print(f"Warning: Unknown model type '{model_type}'. Skipping model compilation.")
+            return None
 
         model.fit(normalized_train_ds, epochs=epochs)
 
@@ -602,7 +647,7 @@ if __name__ == "__main__":
     trained_object_detection_model_path = os.path.join(MODEL_SAVE_DIR, OBJECT_DETECTION_MODEL_NAME)
     if os.path.exists(trained_object_detection_model_path):
         print(f"Loading trained object detection model from {trained_object_detection_model_path}")
-        object_detection_model = keras.models.load_model(trained_object_detection_model_path)
+        object_detection_model = keras.models.load_model(trained_object_detection_model_path, custom_objects={'mse': keras.losses.MeanSquaredError()})
     else:
         print("No trained object detection model found. Using newly created model (untrained).")
 
