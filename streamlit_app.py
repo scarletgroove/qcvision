@@ -89,6 +89,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "feed_idle_sub":            {"en": "Select a source and press Start",
                                  "th": "เลือกแหล่งและกด เริ่ม"},
     "feed_ended":               {"en": "Stream ended.",         "th": "สัญญาณวิดีโอสิ้นสุดแล้ว"},
+    "feed_no_source":           {"en": "Could not open source. Camera / device not found or inaccessible.",
+                                 "th": "ไม่สามารถเปิดแหล่งวิดีโอได้ ไม่พบกล้องหรืออุปกรณ์"},
+    "local_only_note":          {"en": "⚠️ Requires local deployment — not available on cloud.",
+                                 "th": "⚠️ ใช้งานได้เฉพาะเมื่อติดตั้งในเครื่อง ไม่รองรับบนคลาวด์"},
     "no_source_warning":        {"en": "Configure a video source first.",
                                  "th": "โปรดตั้งค่าแหล่งวิดีโอก่อน"},
     # ── Metrics ──────────────────────────────────────────────────────────
@@ -494,7 +498,7 @@ def _capture_worker(
             files += glob_module.glob(os.path.join(video_source, ext.upper()))
         files = sorted(set(files))
         if not files:
-            frame_queue.put(None)
+            frame_queue.put("error:no_source")
             return
         interval = 1.0 / max(1, images_fps)
         frame_count = 0
@@ -516,7 +520,7 @@ def _capture_worker(
             import numpy as np
             from harvesters.core import Harvester
         except ImportError:
-            frame_queue.put(None)
+            frame_queue.put("error:no_source")
             return
         cti_path, camera_index = video_source   # tuple passed from sidebar
         h = Harvester()
@@ -524,7 +528,7 @@ def _capture_worker(
             h.add_file(cti_path)
             h.update()
             if not h.device_info_list:
-                frame_queue.put(None)
+                frame_queue.put("error:no_source")
                 return
             idx = min(camera_index, len(h.device_info_list) - 1)
             ia = h.create(idx)
@@ -558,7 +562,7 @@ def _capture_worker(
     # ── OpenCV-compatible sources: webcam / video file / RTSP / MJPEG ───────
     cap = cv2.VideoCapture(video_source)
     if not cap.isOpened():
-        frame_queue.put(None)
+        frame_queue.put("error:no_source")
         return
 
     source_fps  = cap.get(cv2.CAP_PROP_FPS) or 30
@@ -644,6 +648,7 @@ with st.sidebar:
     _images_fps        = 10
 
     if video_source_option == t("source_webcam"):
+        st.caption(t("local_only_note"))
         webcam_index = st.number_input(t("webcam_index"), min_value=0, value=0, step=1)
         video_source_input = int(webcam_index)
 
@@ -658,10 +663,12 @@ with st.sidebar:
             video_source_input = temp_path
 
     elif video_source_option == t("source_ip"):
+        st.caption(t("local_only_note"))
         ip_url = st.text_input(t("rtsp_label"), placeholder=t("rtsp_placeholder"))
         video_source_input = ip_url or None
 
     elif video_source_option == t("source_mjpeg"):
+        st.caption(t("local_only_note"))
         mjpeg_url = st.text_input(t("mjpeg_label"), placeholder=t("mjpeg_placeholder"))
         video_source_input = mjpeg_url or None
         # OpenCV reads MJPEG streams the same way as RTSP — source_type stays "cv2"
@@ -678,6 +685,7 @@ with st.sidebar:
 
     elif video_source_option == t("source_gige"):
         _source_type = "gige"
+        st.caption(t("local_only_note"))
         cti_path = st.text_input(
             t("gige_cti_label"),
             placeholder=t("gige_cti_placeholder"),
@@ -883,6 +891,10 @@ if st.session_state.processing:
             _stop_capture()
             with status_placeholder:
                 st.info(t("feed_ended"))
+        elif item == "error:no_source":
+            _stop_capture()
+            with status_placeholder:
+                st.error(t("feed_no_source"))
         elif item != "no_frame":
             frame_rgb, defect_infos, frame_count = item
             st.session_state.frame_count    = frame_count
