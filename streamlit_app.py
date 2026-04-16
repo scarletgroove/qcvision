@@ -10,9 +10,11 @@ Architecture:
 """
 
 import base64
+import glob as glob_module
 import os
 import queue as queue_module
 import threading
+import time
 from collections import defaultdict
 from datetime import datetime
 
@@ -36,10 +38,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "source_webcam":            {"en": "Webcam",                "th": "เว็บแคม"},
     "source_file":              {"en": "Video File",            "th": "ไฟล์วิดีโอ"},
     "source_ip":                {"en": "IP Camera",             "th": "กล้อง IP"},
+    "source_mjpeg":             {"en": "HTTP MJPEG",            "th": "HTTP MJPEG"},
+    "source_images":            {"en": "Image Sequence",        "th": "ลำดับภาพ"},
+    "source_gige":              {"en": "GigE Vision",           "th": "GigE Vision"},
     "webcam_index":             {"en": "Webcam Index",          "th": "หมายเลขเว็บแคม"},
     "upload_label":             {"en": "Video File",            "th": "เลือกไฟล์วิดีโอ"},
     "rtsp_label":               {"en": "RTSP URL",              "th": "URL กล้อง RTSP"},
     "rtsp_placeholder":         {"en": "rtsp://user:pass@ip/stream", "th": "rtsp://user:pass@ip/stream"},
+    "mjpeg_label":              {"en": "MJPEG Stream URL",      "th": "URL สตรีม MJPEG"},
+    "mjpeg_placeholder":        {"en": "http://192.168.1.x/video.mjpg", "th": "http://192.168.1.x/video.mjpg"},
+    "images_label":             {"en": "Image Folder Path",     "th": "พาธโฟลเดอร์ภาพ"},
+    "images_placeholder":       {"en": "/path/to/frames/",      "th": "/path/to/frames/"},
+    "images_fps":               {"en": "Playback FPS",          "th": "FPS การเล่น"},
+    "images_help":              {"en": "Folder containing .jpg / .png frames processed in filename order.",
+                                 "th": "โฟลเดอร์ที่มีเฟรม .jpg / .png ประมวลผลตามลำดับชื่อไฟล์"},
+    "gige_cti_label":           {"en": "CTI File Path",         "th": "พาธไฟล์ CTI"},
+    "gige_cti_placeholder":    {"en": "/path/to/producer.cti", "th": "/path/to/producer.cti"},
+    "gige_cti_help":           {"en": "Path to the GenTL producer (.cti) file supplied by your camera manufacturer.",
+                                 "th": "พาธไปยังไฟล์ GenTL producer (.cti) ที่ผู้ผลิตกล้องจัดให้"},
+    "gige_index":              {"en": "Camera Index",           "th": "หมายเลขกล้อง"},
+    "gige_index_help":         {"en": "Index of the camera to open when multiple devices are detected.",
+                                 "th": "หมายเลขกล้องที่ต้องการเปิดเมื่อพบอุปกรณ์หลายตัว"},
+    "gige_help":               {"en": "Requires the 'harvesters' package:",
+                                 "th": "ต้องติดตั้งแพ็กเกจ 'harvesters':"},
     "section_detection":        {"en": "Detection Parameters",  "th": "ค่าพารามิเตอร์การตรวจจับ"},
     "conf_threshold":           {"en": "Confidence Threshold",  "th": "ค่าความเชื่อมั่น"},
     "conf_help":                {"en": "Min confidence to register a detection.",
@@ -99,6 +120,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "gallery_empty":            {"en": "No defective images captured yet.",
                                  "th": "ยังไม่มีภาพข้อบกพร่องที่บันทึกไว้"},
     "gallery_count":            {"en": "Saved Images",          "th": "ภาพที่บันทึก"},
+    # ── Image saving toggle ───────────────────────────────────────────────
+    "save_images_toggle":       {"en": "Save Defect Images",    "th": "บันทึกภาพข้อบกพร่อง"},
+    "save_images_help":         {"en": "Save annotated frames to the defective_images/ folder.",
+                                 "th": "บันทึกเฟรมที่มีข้อบกพร่องลงในโฟลเดอร์ defective_images/"},
 }
 
 # ---------------------------------------------------------------------------
@@ -296,17 +321,31 @@ def t(key: str) -> str:
 
 # Language switcher rendered at the very top of the sidebar
 with st.sidebar:
+    st.markdown(
+        '<style>'
+        '#lang-switcher { display:flex; gap:6px; margin-bottom:4px; }'
+        '#lang-switcher [data-testid="stButton"] { flex:1; }'
+        '#lang-switcher [data-testid="stButton"] button {'
+        '  font-size:0.75rem !important; padding:4px 0 !important;'
+        '  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;'
+        '  letter-spacing:0.03em !important;'
+        '}'
+        '</style>'
+        '<div id="lang-switcher">',
+        unsafe_allow_html=True,
+    )
     lang_col1, lang_col2 = st.columns(2)
     with lang_col1:
-        if st.button("🇬🇧  English", use_container_width=True,
+        if st.button("🇬🇧 EN", use_container_width=True,
                      type="primary" if st.session_state.lang == "en" else "secondary"):
             st.session_state.lang = "en"
             st.rerun()
     with lang_col2:
-        if st.button("🇹🇭  ภาษาไทย", use_container_width=True,
+        if st.button("🇹🇭 ไทย", use_container_width=True,
                      type="primary" if st.session_state.lang == "th" else "secondary"):
             st.session_state.lang = "th"
             st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # Defect type label map — language-aware
 _TYPE_LABEL: dict[int, str] = {
@@ -326,7 +365,6 @@ def get_detector() -> DefectDetector:
     return DefectDetector()
 
 detector = get_detector()
-detector.save_images = True   # persist annotated frames to defective_images/
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -406,6 +444,7 @@ _defaults: dict = {
     "latest_defects":  [],
     "alert_feed":      [],
     "type_counts":     defaultdict(int),
+    "save_images":     False,
 }
 for k, v in _defaults.items():
     if k not in st.session_state:
@@ -415,6 +454,27 @@ for k, v in _defaults.items():
 # Capture worker
 # ---------------------------------------------------------------------------
 
+def _resize_frame(frame, display_height: int):
+    """Resize frame to fit within a 16:9 bounding box of the given height."""
+    max_h = display_height
+    max_w = display_height * 16 // 9
+    h, w  = frame.shape[:2]
+    scale = min(max_w / w, max_h / h, 1.0)
+    return cv2.resize(frame, (int(w * scale), int(h * scale)),
+                      interpolation=cv2.INTER_AREA)
+
+
+def _process_and_enqueue(frame, frame_count, frame_queue, detector, display_height):
+    """Resize, detect, convert to RGB, and put onto queue (non-blocking)."""
+    frame_small = _resize_frame(frame, display_height)
+    marked, defect_infos = detector.process_frame(frame_small)
+    frame_rgb = cv2.cvtColor(marked, cv2.COLOR_BGR2RGB)
+    try:
+        frame_queue.put_nowait((frame_rgb, defect_infos, frame_count))
+    except queue_module.Full:
+        pass
+
+
 def _capture_worker(
     video_source,
     frame_queue: queue_module.Queue,
@@ -422,14 +482,87 @@ def _capture_worker(
     detector: DefectDetector,
     target_fps: int = 15,
     display_height: int = 480,
+    source_type: str = "cv2",   # "cv2" | "images" | "gige"
+    images_fps: int = 10,
 ) -> None:
+    # ── Image sequence ───────────────────────────────────────────────────────
+    if source_type == "images":
+        exts = ("*.jpg", "*.jpeg", "*.png", "*.bmp")
+        files = []
+        for ext in exts:
+            files += glob_module.glob(os.path.join(video_source, ext))
+            files += glob_module.glob(os.path.join(video_source, ext.upper()))
+        files = sorted(set(files))
+        if not files:
+            frame_queue.put(None)
+            return
+        interval = 1.0 / max(1, images_fps)
+        frame_count = 0
+        for fpath in files:
+            if stop_event.is_set():
+                break
+            frame = cv2.imread(fpath)
+            if frame is None:
+                continue
+            frame_count += 1
+            _process_and_enqueue(frame, frame_count, frame_queue, detector, display_height)
+            time.sleep(interval)
+        frame_queue.put(None)
+        return
+
+    # ── GigE Vision via harvesters (GenICam / GigE Vision standard) ─────────
+    if source_type == "gige":
+        try:
+            import numpy as np
+            from harvesters.core import Harvester
+        except ImportError:
+            frame_queue.put(None)
+            return
+        cti_path, camera_index = video_source   # tuple passed from sidebar
+        h = Harvester()
+        try:
+            h.add_file(cti_path)
+            h.update()
+            if not h.device_info_list:
+                frame_queue.put(None)
+                return
+            idx = min(camera_index, len(h.device_info_list) - 1)
+            ia = h.create(idx)
+            ia.start()
+            frame_count = 0
+            try:
+                while not stop_event.is_set():
+                    with ia.fetch(timeout=2.0) as buffer:
+                        component = buffer.payload.components[0]
+                        data = component.data
+                        h_px, w_px = component.height, component.width
+                        channels = data.size // (h_px * w_px)
+                        frame = data.reshape(h_px, w_px, channels) if channels > 1 \
+                                else cv2.cvtColor(
+                                    data.reshape(h_px, w_px), cv2.COLOR_GRAY2BGR
+                                )
+                        if channels == 3:
+                            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                        frame_count += 1
+                        _process_and_enqueue(
+                            frame, frame_count, frame_queue, detector, display_height
+                        )
+            finally:
+                ia.stop()
+                ia.destroy()
+        finally:
+            h.reset()
+        frame_queue.put(None)
+        return
+
+    # ── OpenCV-compatible sources: webcam / video file / RTSP / MJPEG ───────
     cap = cv2.VideoCapture(video_source)
     if not cap.isOpened():
         frame_queue.put(None)
         return
 
-    source_fps = cap.get(cv2.CAP_PROP_FPS) or 30
-    frame_skip = max(1, int(source_fps / target_fps))
+    source_fps  = cap.get(cv2.CAP_PROP_FPS) or 30
+    frame_skip  = max(1, int(source_fps / target_fps))
     frame_count = 0
 
     try:
@@ -440,36 +573,27 @@ def _capture_worker(
             frame_count += 1
             if frame_count % frame_skip != 0:
                 continue
-
-            max_h = display_height
-            max_w = display_height * 16 // 9
-            h, w  = frame.shape[:2]
-            scale = min(max_w / w, max_h / h, 1.0)
-            frame_small = cv2.resize(
-                frame, (int(w * scale), int(h * scale)),
-                interpolation=cv2.INTER_AREA,
-            )
-
-            marked, defect_infos = detector.process_frame(frame_small)
-            frame_rgb = cv2.cvtColor(marked, cv2.COLOR_BGR2RGB)
-
-            try:
-                frame_queue.put_nowait((frame_rgb, defect_infos, frame_count))
-            except queue_module.Full:
-                pass
+            _process_and_enqueue(frame, frame_count, frame_queue, detector, display_height)
     finally:
         cap.release()
         frame_queue.put(None)
 
 
-def _start_capture(video_source, display_height: int = 480) -> None:
+def _start_capture(
+    video_source,
+    display_height: int = 480,
+    source_type: str = "cv2",
+    images_fps: int = 10,
+) -> None:
     _stop_capture()
     stop_event  = threading.Event()
     frame_queue = queue_module.Queue(maxsize=4)
     thread = threading.Thread(
         target=_capture_worker,
         args=(video_source, frame_queue, stop_event, detector),
-        kwargs={"display_height": display_height},
+        kwargs={"display_height": display_height,
+                "source_type": source_type,
+                "images_fps": images_fps},
         daemon=True,
     )
     thread.start()
@@ -508,15 +632,21 @@ with st.sidebar:
     st.markdown("---")
     st.markdown(f"#### {t('section_source')}")
 
-    source_options = [t("source_webcam"), t("source_file"), t("source_ip")]
+    source_options = [
+        t("source_webcam"), t("source_file"), t("source_ip"),
+        t("source_mjpeg"), t("source_images"), t("source_gige"),
+    ]
     video_source_option = st.radio("source", source_options, label_visibility="collapsed")
 
     video_source_input = None
-    uploaded_file = None
+    uploaded_file      = None
+    _source_type       = "cv2"   # passed to _start_capture
+    _images_fps        = 10
 
     if video_source_option == t("source_webcam"):
         webcam_index = st.number_input(t("webcam_index"), min_value=0, value=0, step=1)
         video_source_input = int(webcam_index)
+
     elif video_source_option == t("source_file"):
         uploaded_file = st.file_uploader(t("upload_label"), type=["mp4", "avi", "mov", "mkv"])
         if uploaded_file:
@@ -526,9 +656,43 @@ with st.sidebar:
             with open(temp_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
             video_source_input = temp_path
+
     elif video_source_option == t("source_ip"):
         ip_url = st.text_input(t("rtsp_label"), placeholder=t("rtsp_placeholder"))
         video_source_input = ip_url or None
+
+    elif video_source_option == t("source_mjpeg"):
+        mjpeg_url = st.text_input(t("mjpeg_label"), placeholder=t("mjpeg_placeholder"))
+        video_source_input = mjpeg_url or None
+        # OpenCV reads MJPEG streams the same way as RTSP — source_type stays "cv2"
+
+    elif video_source_option == t("source_images"):
+        _source_type = "images"
+        folder_path = st.text_input(
+            t("images_label"),
+            placeholder=t("images_placeholder"),
+            help=t("images_help"),
+        )
+        _images_fps = st.slider(t("images_fps"), min_value=1, max_value=30, value=10)
+        video_source_input = folder_path or None
+
+    elif video_source_option == t("source_gige"):
+        _source_type = "gige"
+        cti_path = st.text_input(
+            t("gige_cti_label"),
+            placeholder=t("gige_cti_placeholder"),
+            help=t("gige_cti_help"),
+        )
+        gige_index = st.number_input(
+            t("gige_index"), min_value=0, value=0, step=1,
+            help=t("gige_index_help"),
+        )
+        # Pass as tuple; worker unpacks (cti_path, camera_index)
+        video_source_input = (cti_path, int(gige_index)) if cti_path else None
+        try:
+            from harvesters.core import Harvester  # noqa: F401
+        except ImportError:
+            st.warning(t("gige_help") + "  \n`pip install harvesters`")
 
     st.markdown("---")
     st.markdown(f"#### {t('section_detection')}")
@@ -560,6 +724,15 @@ with st.sidebar:
     display_height = st.select_slider(
         t("feed_height"), options=[240, 360, 480, 720], value=480,
     )
+    save_images = st.toggle(
+        t("save_images_toggle"),
+        value=st.session_state.save_images,
+        help=t("save_images_help"),
+    )
+    st.session_state.save_images = save_images
+
+# Sync toggle → detector (runs after sidebar, so value is current on every rerun)
+detector.save_images = st.session_state.save_images
 
 # ---------------------------------------------------------------------------
 # Header
@@ -603,11 +776,16 @@ if stop_btn:
     _stop_capture()
 
 if start_btn:
-    if not video_source_input and video_source_input != 0:
+    if video_source_input is None or video_source_input == "":
         st.warning(t("no_source_warning"))
     else:
         st.session_state.video_source = video_source_input
-        _start_capture(video_source_input, display_height=display_height)
+        _start_capture(
+            video_source_input,
+            display_height=display_height,
+            source_type=_source_type,
+            images_fps=_images_fps,
+        )
 
 # ---------------------------------------------------------------------------
 # Main content
